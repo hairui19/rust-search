@@ -3,12 +3,8 @@ mod lexer;
 
 use crate::lexer::Lexer;
 use std::collections::HashMap;
-use std::fs::{self, DirEntry, File};
-use std::path::{Path, PathBuf};
-use std::process::exit;
-use xml::reader::{EventReader, XmlEvent};
+use std::path::PathBuf;
 
-const FILE_PATH: &str = "/Users/hairuilin/Documents/docs.gl/gl4/glVertexAttribDivisor.xhtml";
 const DIR_PATH: &str = "/Users/hairuilin/Documents/docs.gl";
 
 fn main() -> std::io::Result<()> {
@@ -18,11 +14,11 @@ fn main() -> std::io::Result<()> {
             None => false,
         })?;
 
-    let mut term_frequency_index = HashMap::<PathBuf, Vec<(String, usize)>>::new();
+    let mut term_frequency_index = HashMap::<PathBuf, HashMap<String, usize>>::new();
     for entry in file_entries {
         println!("Indexing {:?}", entry.path());
         let content = dir::parse_xml_file(entry.path())?;
-        let mut term_frequency = Lexer::new(&content).into_iter().fold(
+        let term_frequency = Lexer::new(&content).into_iter().fold(
             HashMap::<String, usize>::new(),
             |mut tf, token| {
                 tf.entry(token.iter().collect())
@@ -32,11 +28,13 @@ fn main() -> std::io::Result<()> {
             },
         );
 
-        let mut stats = term_frequency.into_iter().collect::<Vec<_>>();
+        let mut stats = term_frequency.iter().collect::<Vec<_>>();
 
         stats.sort_by_key(|(_, freq)| *freq);
         stats.reverse();
-        term_frequency_index.entry(entry.path()).or_insert(stats);
+        term_frequency_index
+            .entry(entry.path())
+            .or_insert(term_frequency);
     }
 
     for (key, value) in term_frequency_index {
