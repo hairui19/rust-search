@@ -1,9 +1,12 @@
+use crate::dir;
+use crate::Lexer;
+use std::collections::HashMap;
 use std::fs::{self, DirEntry, File};
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use xml::reader::{EventReader, XmlEvent};
 
-pub fn extract_files<P, F>(dir_path: P, predicate: F) -> std::io::Result<Vec<DirEntry>>
+fn extract_files<P, F>(dir_path: P, predicate: F) -> std::io::Result<Vec<DirEntry>>
 where
     P: AsRef<Path>,
     F: Fn(&DirEntry) -> bool + Copy,
@@ -25,7 +28,7 @@ where
     Ok(file_entries)
 }
 
-pub fn parse_xml_file<P: AsRef<Path>>(file_path: P) -> std::io::Result<Vec<char>> {
+fn parse_xml_file<P: AsRef<Path>>(file_path: P) -> std::io::Result<Vec<char>> {
     let file_extension = file_path.as_ref().extension().unwrap();
     if file_extension != "xhtml" {
         return Err(std::io::Error::new(
@@ -46,4 +49,45 @@ pub fn parse_xml_file<P: AsRef<Path>>(file_path: P) -> std::io::Result<Vec<char>
         .collect::<String>();
 
     Ok(content.chars().collect::<Vec<char>>())
+}
+
+pub fn write_xhtml_files_in_json<P, Q>(target_file_path: P, from_dir_path: Q) -> std::io::Result<()>
+where
+    P: AsRef<Path>,
+    Q: AsRef<Path>,
+{
+    let file_entries = dir::extract_files(from_dir_path.as_ref(), |dir_entry| {
+        match dir_entry.path().extension() {
+            Some(extension) => extension == "xhtml",
+            None => false,
+        }
+    })?;
+
+    let mut term_frequency_index = HashMap::<PathBuf, HashMap<String, usize>>::new();
+    for entry in file_entries {
+        println!("Indexing {:?}", entry.path());
+        let content = dir::parse_xml_file(entry.path())?;
+        let term_frequency = Lexer::new(&content).into_iter().fold(
+            HashMap::<String, usize>::new(),
+            |mut tf, token| {
+                tf.entry(token.iter().collect())
+                    .and_modify(|count| *count += 1)
+                    .or_insert(1);
+                tf
+            },
+        );
+
+        let mut stats = term_frequency.iter().collect::<Vec<_>>();
+
+        stats.sort_by_key(|(_, freq)| *freq);
+        stats.reverse();
+        term_frequency_index
+            .entry(entry.path())
+            .or_insert(term_frequency);
+    }
+
+    let file = File::create(target_file_path.as_ref())?;
+    _ = serde_json::to_writer_pretty(file, &term_frequency_index);
+
+    Ok(())
 }
